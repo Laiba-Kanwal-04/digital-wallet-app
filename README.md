@@ -121,7 +121,7 @@ digital-wallet-app/
 │       ├── app.js          # Main frontend logic
 │       ├── charts.js       # Chart configurations
 │       └── utils.js        # Utility functions
-├── db-schema.sql     # Complete database schema
+├── db-schema.sql           # Complete database schema
 ├── package.json
 ├── .env.example            # Example environment variables
 └── README.md
