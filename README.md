@@ -84,7 +84,7 @@ JWT_SECRET=your_secret_key_here
 
 ### 5. Run the database schema
 
-Run the `database-schema.sql` file in your database:
+Run the `db-schema.sql` file in your database:
 
 - **Using Neon Console**: Copy and paste the entire SQL script
 
@@ -216,7 +216,7 @@ This project is for educational purposes.
 3. **Create a Neon database** (or use local PostgreSQL)
 4. **Copy database connection string**
 5. **Create `.env` file** with their database URL
-6. **Run the `database-schema.sql`** in their database
+6. **Run the `db-schema.sql`** in their database
 7. **Run `npm start`**
 8. **Open browser to `http://localhost:5000`**
 
