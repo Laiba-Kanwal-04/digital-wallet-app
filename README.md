@@ -57,18 +57,11 @@ npm install
 
 ### 3. Set up the database
 
-#### Option A: Using Neon Tech (Recommended - Free)
+#### Using Neon Tech (Recommended - Free)
 
 1. Go to [Neon Tech](https://neon.tech/) and create a free account
 2. Create a new project
 3. Copy your database connection string
-
-#### Option B: Local PostgreSQL
-
-```bash
-# Create a database
-createdb digital_wallet
-```
 
 ### 4. Configure environment variables
 
