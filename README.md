@@ -190,16 +190,6 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
-## Support
-
-For issues or questions, please open an issue on GitHub.
-
-## License
-
-This project is for educational purposes.
-
----
-
 **Happy Coding!** 
 
 ## What Users Need to Do (Summary):
