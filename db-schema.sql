@@ -362,7 +362,7 @@ INSERT INTO transactions (reference, user_id, type, amount, description, status,
 ('DEP_JUN2', 2, 'deposit', 300, 'Freelance', 'completed', NOW() - INTERVAL '4 days'),
 ('WTH_JUN1', 1, 'withdraw', 100, 'ATM', 'completed', NOW() - INTERVAL '3 days'),
 ('DEP_JUN3', 4, 'deposit', 1000, 'Bonus', 'completed', NOW() - INTERVAL '2 days'),
-('SENT_JUN1', 1, 'sent', 50, 'Lunch', 2, 'completed', NOW() - INTERVAL '1 day')
+('SENT_JUN1', 1, 'sent', 50, 'Lunch', 'completed', NOW() - INTERVAL '1 day')  -- Removed the extra '2'
 ON CONFLICT (reference) DO NOTHING;
 
 -- ============================================
