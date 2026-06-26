@@ -304,11 +304,11 @@ ON CONFLICT (name) DO NOTHING;
 -- SAMPLE USERS (password: password123)
 -- ============================================
 INSERT INTO users (id, name, email, password_hash, role, balance, status, created_at) VALUES
-(1, 'Laiba Kanwal', 'bsse2480204@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 15000, 'active', NOW() - INTERVAL '30 days'),
-(2, 'Shahla Abbasi', 'bsse2480221@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 8000, 'active', NOW() - INTERVAL '30 days'),
-(3, 'Admin User', 'admin@digitalwallet.com', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'admin', 0, 'active', NOW() - INTERVAL '30 days'),
-(4, 'Alishba Islam', 'bsse2480187@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 50000, 'active', NOW() - INTERVAL '25 days'),
-(5, 'Test User', 'test@example.com', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 1000, 'active', NOW() - INTERVAL '20 days')
+(1, 'Laiba Kanwal', 'bsse2480204@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 15000, 'active', NOW() - INTERVAL '30 days'),
+(2, 'Shahla Abbasi', 'bsse2480221@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 8000, 'active', NOW() - INTERVAL '30 days'),
+(3, 'Admin User', 'admin@digitalwallet.com', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'admin', 0, 'active', NOW() - INTERVAL '30 days'),
+(4, 'Alishba Islam', 'bsse2480187@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 50000, 'active', NOW() - INTERVAL '25 days'),
+(5, 'Test User', 'test@example.com', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 1000, 'active', NOW() - INTERVAL '20 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- Reset sequence after manual IDs
