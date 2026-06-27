@@ -304,11 +304,11 @@ ON CONFLICT (name) DO NOTHING;
 -- SAMPLE USERS (password: password123)
 -- ============================================
 INSERT INTO users (id, name, email, password_hash, role, balance, status, created_at) VALUES
-(1, 'Laiba Kanwal', 'bsse2480204@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 15000, 'active', NOW() - INTERVAL '30 days'),
-(2, 'Shahla Abbasi', 'bsse2480221@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 8000, 'active', NOW() - INTERVAL '30 days'),
-(3, 'Admin User', 'admin@digitalwallet.com', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'admin', 0, 'active', NOW() - INTERVAL '30 days'),
-(4, 'Alishba Islam', 'bsse2480187@szabist.pk', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 50000, 'active', NOW() - INTERVAL '25 days'),
-(5, 'Test User', 'test@example.com', '$2a$10$rZkZVQ6yXsZQEFhKZ/XZHORLq1XSsk2q8Q4Kx4vFyVqEJqIW5bCNq', 'user', 1000, 'active', NOW() - INTERVAL '20 days')
+(1, 'Laiba Kanwal', 'bsse2480204@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 15000, 'active', NOW() - INTERVAL '30 days'),
+(2, 'Shahla Abbasi', 'bsse2480221@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 8000, 'active', NOW() - INTERVAL '30 days'),
+(3, 'Admin User', 'admin@digitalwallet.com', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'admin', 0, 'active', NOW() - INTERVAL '30 days'),
+(4, 'Alishba Islam', 'bsse2480187@szabist.pk', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 50000, 'active', NOW() - INTERVAL '25 days'),
+(5, 'Test User', 'test@example.com', '$2a$12$FDXyAsfaaegL4.MMuoubBeJpmcgaDVOl2RPwcvPHOXppvO99bsoc2', 'user', 1000, 'active', NOW() - INTERVAL '20 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- Reset sequence after manual IDs
@@ -362,7 +362,7 @@ INSERT INTO transactions (reference, user_id, type, amount, description, status,
 ('DEP_JUN2', 2, 'deposit', 300, 'Freelance', 'completed', NOW() - INTERVAL '4 days'),
 ('WTH_JUN1', 1, 'withdraw', 100, 'ATM', 'completed', NOW() - INTERVAL '3 days'),
 ('DEP_JUN3', 4, 'deposit', 1000, 'Bonus', 'completed', NOW() - INTERVAL '2 days'),
-('SENT_JUN1', 1, 'sent', 50, 'Lunch', 2, 'completed', NOW() - INTERVAL '1 day')
+('SENT_JUN1', 1, 'sent', 50, 'Lunch', 'completed', NOW() - INTERVAL '1 day')  -- Removed the extra '2'
 ON CONFLICT (reference) DO NOTHING;
 
 -- ============================================
@@ -377,7 +377,7 @@ SELECT setval('categories_id_seq', (SELECT MAX(id) FROM categories));
 -- ============================================
 -- VERIFICATION QUERIES (Run these to check)
 -- ============================================
--- SELECT 'Users count:' as info, COUNT(*) FROM users;
--- SELECT 'Transactions count:' as info, COUNT(*) FROM transactions;
--- SELECT 'Categories count:' as info, COUNT(*) FROM categories;
--- SELECT 'Monthly Summary:' as info, TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month, SUM(amount) as total FROM transactions GROUP BY DATE_TRUNC('month', created_at) ORDER BY month DESC LIMIT 6;
+ SELECT 'Users count:' as info, COUNT(*) FROM users;
+ SELECT 'Transactions count:' as info, COUNT(*) FROM transactions;
+ SELECT 'Categories count:' as info, COUNT(*) FROM categories;
+ SELECT 'Monthly Summary:' as info, TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month, SUM(amount) as total FROM transactions GROUP BY DATE_TRUNC('month', created_at) ORDER BY month DESC LIMIT 6;
