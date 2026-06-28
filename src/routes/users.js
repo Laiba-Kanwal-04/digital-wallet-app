@@ -6,6 +6,10 @@ const { auth } = require('../middleware/auth');
 
 const router = express.Router();
 
+// ============================================
+// AUTHENTICATION ROUTES
+// ============================================
+
 // POST /api/users/register - Register new user
 router.post('/register', async (req, res) => {
     try {
@@ -82,6 +86,13 @@ router.post('/login', async (req, res) => {
             { expiresIn: '7d' }
         );
         
+        // Log security event
+        await db.query(
+            `INSERT INTO security_logs (user_id, action, ip_address, user_agent)
+             VALUES ($1, $2, $3, $4)`,
+            [user.id, 'login_success', req.ip || req.connection.remoteAddress, req.headers['user-agent'] || 'Unknown']
+        );
+        
         delete user.password_hash;
         res.json({ user, token });
     } catch (error) {
@@ -89,6 +100,10 @@ router.post('/login', async (req, res) => {
         res.status(500).json({ error: 'Login failed' });
     }
 });
+
+// ============================================
+// PROFILE ROUTES
+// ============================================
 
 // GET /api/users/profile - Get user profile
 router.get('/profile', auth, async (req, res) => {
@@ -131,6 +146,10 @@ router.put('/profile', auth, async (req, res) => {
     }
 });
 
+// ============================================
+// NOTIFICATION ROUTES
+// ============================================
+
 // GET /api/users/notifications - Get notifications
 router.get('/notifications', auth, async (req, res) => {
     try {
@@ -158,6 +177,10 @@ router.put('/notifications/:id/read', auth, async (req, res) => {
         res.status(500).json({ error: 'Failed to update notification' });
     }
 });
+
+// ============================================
+// BENEFICIARY ROUTES
+// ============================================
 
 // GET /api/users/beneficiaries - Get beneficiaries
 router.get('/beneficiaries', auth, async (req, res) => {
@@ -202,6 +225,292 @@ router.delete('/beneficiaries/:id', auth, async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to delete beneficiary' });
+    }
+});
+
+// ============================================
+// SUPPORT TICKET ROUTES (NEW)
+// ============================================
+
+// POST /api/users/tickets - Create support ticket
+router.post('/tickets', auth, async (req, res) => {
+    try {
+        const { subject, message } = req.body;
+        
+        if (!subject || !message) {
+            return res.status(400).json({ error: 'Subject and message are required' });
+        }
+        
+        const result = await db.query(
+            `INSERT INTO support_tickets (user_id, subject, message, status)
+             VALUES ($1, $2, $3, 'open') RETURNING *`,
+            [req.user.id, subject, message]
+        );
+        
+        await db.query(
+            `INSERT INTO notifications (user_id, message, is_read)
+             VALUES ($1, $2, false)`,
+            [req.user.id, `Support ticket #${result.rows[0].id} created successfully`]
+        );
+        
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to create ticket' });
+    }
+});
+
+// GET /api/users/tickets - Get user's tickets
+router.get('/tickets', auth, async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT * FROM support_tickets 
+             WHERE user_id = $1 
+             ORDER BY created_at DESC`,
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to get tickets' });
+    }
+});
+
+// ============================================
+// PAYMENT METHOD ROUTES (NEW)
+// ============================================
+
+// POST /api/users/payment-methods - Add payment method
+router.post('/payment-methods', auth, async (req, res) => {
+    try {
+        const { card_last4, card_brand, is_default } = req.body;
+        
+        // If this is default, remove default from others
+        if (is_default) {
+            await db.query(
+                'UPDATE payment_methods SET is_default = false WHERE user_id = $1',
+                [req.user.id]
+            );
+        }
+        
+        const result = await db.query(
+            `INSERT INTO payment_methods (user_id, card_last4, card_brand, is_default)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [req.user.id, card_last4, card_brand, is_default || false]
+        );
+        
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to add payment method' });
+    }
+});
+
+// GET /api/users/payment-methods - Get user's payment methods
+router.get('/payment-methods', auth, async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT * FROM payment_methods 
+             WHERE user_id = $1 
+             ORDER BY is_default DESC, created_at DESC`,
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to get payment methods' });
+    }
+});
+
+// ============================================
+// CATEGORY ROUTES (NEW)
+// ============================================
+
+// GET /api/users/categories - Get all categories
+router.get('/categories', auth, async (req, res) => {
+    try {
+        const result = await db.query(
+            'SELECT * FROM categories ORDER BY name'
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to get categories' });
+    }
+});
+
+// POST /api/users/categories - Add custom category (admin only)
+router.post('/categories', auth, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin only' });
+        }
+        
+        const { name, type, icon, color } = req.body;
+        
+        const result = await db.query(
+            `INSERT INTO categories (name, type, icon, color)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [name, type, icon, color]
+        );
+        
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to add category' });
+    }
+});
+
+// ============================================
+// BUDGET ROUTES (NEW)
+// ============================================
+
+// POST /api/users/budgets - Create/Update budget
+router.post('/budgets', auth, async (req, res) => {
+    try {
+        const { category_name, amount, month, year } = req.body;
+        
+        // Get category ID
+        const categoryResult = await db.query(
+            'SELECT id FROM categories WHERE name = $1',
+            [category_name]
+        );
+        
+        if (categoryResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        
+        const categoryId = categoryResult.rows[0].id;
+        const targetMonth = month || new Date().getMonth() + 1;
+        const targetYear = year || new Date().getFullYear();
+        
+        // Upsert budget
+        const result = await db.query(
+            `INSERT INTO budgets (user_id, category_id, amount, month, year)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, category_id, month, year) 
+             DO UPDATE SET amount = $3, updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [req.user.id, categoryId, amount, targetMonth, targetYear]
+        );
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to set budget' });
+    }
+});
+
+// GET /api/users/budgets - Get user's budgets
+router.get('/budgets', auth, async (req, res) => {
+    try {
+        const { month, year } = req.query;
+        const targetMonth = month || new Date().getMonth() + 1;
+        const targetYear = year || new Date().getFullYear();
+        
+        const result = await db.query(
+            `SELECT b.*, c.name as category_name, c.color, c.icon
+             FROM budgets b
+             JOIN categories c ON b.category_id = c.id
+             WHERE b.user_id = $1 AND b.month = $2 AND b.year = $3
+             ORDER BY c.name`,
+            [req.user.id, targetMonth, targetYear]
+        );
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to get budgets' });
+    }
+});
+
+// ============================================
+// GOAL ROUTES (NEW)
+// ============================================
+
+// POST /api/users/goals - Create goal
+router.post('/goals', auth, async (req, res) => {
+    try {
+        const { name, target_amount, deadline } = req.body;
+        
+        if (!name || !target_amount) {
+            return res.status(400).json({ error: 'Name and target amount required' });
+        }
+        
+        const result = await db.query(
+            `INSERT INTO goals (user_id, name, target_amount, deadline, status)
+             VALUES ($1, $2, $3, $4, 'active') RETURNING *`,
+            [req.user.id, name, target_amount, deadline || null]
+        );
+        
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to create goal' });
+    }
+});
+
+// GET /api/users/goals - Get user's goals
+router.get('/goals', auth, async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT * FROM goals 
+             WHERE user_id = $1 
+             ORDER BY deadline ASC NULLS LAST`,
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to get goals' });
+    }
+});
+
+// PUT /api/users/goals/:id/progress - Update goal progress
+router.put('/goals/:id/progress', auth, async (req, res) => {
+    try {
+        const { current_amount } = req.body;
+        
+        const result = await db.query(
+            `UPDATE goals 
+             SET current_amount = $1,
+                 status = CASE 
+                     WHEN $1 >= target_amount THEN 'completed' 
+                     ELSE 'active' 
+                 END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2 AND user_id = $3
+             RETURNING *`,
+            [current_amount, req.params.id, req.user.id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Goal not found' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to update goal progress' });
+    }
+});
+
+// DELETE /api/users/goals/:id - Delete goal
+router.delete('/goals/:id', auth, async (req, res) => {
+    try {
+        const result = await db.query(
+            'DELETE FROM goals WHERE id = $1 AND user_id = $2 RETURNING id',
+            [req.params.id, req.user.id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Goal not found' });
+        }
+        
+        res.json({ message: 'Goal deleted successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to delete goal' });
     }
 });
 

@@ -315,408 +315,473 @@ function handleUserNavClick(e) {
     else if (page === 'transactions') loadTransactions();
     else if (page === 'transfer') showTransferModal();
     else if (page === 'beneficiaries') loadBeneficiaries();
+    else if (page === 'payments') loadPaymentMethods();
+    else if (page === 'budgets') loadBudgets();
+    else if (page === 'goals') loadGoals();
+    else if (page === 'tickets') loadTickets();
     else if (page === 'profile') loadProfile();
 }
 
-async function loadUserOverview() {
+// ============ PAYMENT METHODS (NEW) ============
+async function loadPaymentMethods() {
     showLoading();
     try {
-        const profile = await apiCall('/users/profile');
-        const transactions = await apiCall('/transactions/history');
-        
-        const uniqueTransactions = [];
-        const seenRefs = new Set();
-        for (const t of transactions) {
-            if (!seenRefs.has(t.reference)) {
-                seenRefs.add(t.reference);
-                uniqueTransactions.push(t);
-            }
-        }
-        
-        const totalSent = uniqueTransactions
-            .filter(t => t.type === 'sent')
-            .reduce((sum, t) => sum + parseFloat(t.amount), 0);
-            
-        const totalReceived = uniqueTransactions
-            .filter(t => t.type === 'received')
-            .reduce((sum, t) => sum + parseFloat(t.amount), 0);
-        
-        const categories = {
-            'Food': 0,
-            'Shopping': 0,
-            'Bills': 0,
-            'Entertainment': 0,
-            'Other': 0
-        };
-        
-        uniqueTransactions.forEach(t => {
-            if (t.type === 'sent') {
-                const desc = (t.description || '').toLowerCase();
-                if (desc.includes('food') || desc.includes('restaurant') || desc.includes('dinner') || desc.includes('lunch')) {
-                    categories['Food'] += parseFloat(t.amount);
-                } else if (desc.includes('shopping') || desc.includes('amazon') || desc.includes('store')) {
-                    categories['Shopping'] += parseFloat(t.amount);
-                } else if (desc.includes('bill') || desc.includes('electric') || desc.includes('water')) {
-                    categories['Bills'] += parseFloat(t.amount);
-                } else if (desc.includes('movie') || desc.includes('netflix') || desc.includes('game')) {
-                    categories['Entertainment'] += parseFloat(t.amount);
-                } else {
-                    categories['Other'] += parseFloat(t.amount);
-                }
-            }
-        });
-        
-        const chartCategories = Object.keys(categories).filter(cat => categories[cat] > 0);
-        const chartAmounts = chartCategories.map(cat => categories[cat]);
-        const hasSpending = chartAmounts.length > 0;
-        
-        const html = `
-            <div class="wallet-card">
-                <div class="wallet-header">
-                    <div><h3>Total Balance</h3><div class="wallet-balance">${formatCurrency(profile.balance)}</div></div>
-                    <i class="fas fa-credit-card" style="font-size: 48px; opacity: 0.3;"></i>
-                </div>
-                <div class="wallet-address">Wallet ID: ${profile.id}</div>
-            </div>
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-info"><h3>Total Sent</h3><div class="stat-value">${formatCurrency(totalSent)}</div></div><div class="stat-icon"><i class="fas fa-arrow-up"></i></div></div>
-                <div class="stat-card"><div class="stat-info"><h3>Total Received</h3><div class="stat-value">${formatCurrency(totalReceived)}</div></div><div class="stat-icon"><i class="fas fa-arrow-down"></i></div></div>
-                <div class="stat-card"><div class="stat-info"><h3>Total Transactions</h3><div class="stat-value">${uniqueTransactions.length}</div></div><div class="stat-icon"><i class="fas fa-exchange-alt"></i></div></div>
-            </div>
-            <div class="action-buttons">
-                <button class="action-btn" onclick="window.showDepositModal()"><i class="fas fa-plus-circle"></i><span>Deposit</span></button>
-                <button class="action-btn" onclick="window.showWithdrawModal()"><i class="fas fa-minus-circle"></i><span>Withdraw</span></button>
-                <button class="action-btn" onclick="window.showTransferModal()"><i class="fas fa-paper-plane"></i><span>Send</span></button>
-                <button class="action-btn" onclick="window.loadTransactions()"><i class="fas fa-history"></i><span>History</span></button>
-            </div>
-            <div class="charts-grid">
-                <div class="chart-card">
-                    <h3>Spending by Category</h3>
-                    ${hasSpending ? '<canvas id="categoryChart"></canvas>' : '<div style="text-align: center; padding: 40px; color: #a0aec0;">No spending data yet</div>'}
-                </div>
-                <div class="chart-card">
-                    <h3>Balance Trend</h3>
-                    <canvas id="balanceChart"></canvas>
-                </div>
-            </div>
-        `;
-        const dashboardContent = document.getElementById('dashboardContent');
-        if (dashboardContent) dashboardContent.innerHTML = html;
-        
-        if (hasSpending && typeof createCategoryChart === 'function') {
-            createCategoryChart({ categories: chartCategories, amounts: chartAmounts });
-        }
-        
-        if (typeof createBalanceChart === 'function') {
-            let runningBalance = 0;
-            const balanceHistory = [];
-            const dateLabels = [];
-            const sortedTransactions = [...uniqueTransactions].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-            
-            let startBalance = profile.balance;
-            sortedTransactions.forEach(t => {
-                if (t.type === 'sent' || t.type === 'withdraw') {
-                    startBalance += parseFloat(t.amount);
-                } else if (t.type === 'received' || t.type === 'deposit') {
-                    startBalance -= parseFloat(t.amount);
-                }
-            });
-            
-            runningBalance = startBalance;
-            
-            sortedTransactions.forEach(t => {
-                if (t.type === 'sent' || t.type === 'withdraw') {
-                    runningBalance -= parseFloat(t.amount);
-                } else if (t.type === 'received' || t.type === 'deposit') {
-                    runningBalance += parseFloat(t.amount);
-                }
-                balanceHistory.push(runningBalance);
-                dateLabels.push(formatDateShort(t.created_at));
-            });
-            
-            if (balanceHistory.length === 0) {
-                balanceHistory.push(profile.balance);
-                dateLabels.push('Today');
-            }
-            
-            createBalanceChart({ labels: dateLabels, balances: balanceHistory });
-        }
-        
-        hideLoading();
-    } catch (error) {
-        console.error('Error loading overview:', error);
-        showToast('Failed to load dashboard: ' + error.message, 'error');
-        hideLoading();
-    }
-}
-
-async function loadTransactions(searchTerm = '') {
-    showLoading();
-    try {
-        const transactions = await apiCall('/transactions/history');
-        
-        let filteredTransactions = transactions;
-        if (searchTerm && searchTerm.trim() !== '') {
-            const term = searchTerm.toLowerCase();
-            filteredTransactions = transactions.filter(t => {
-                return (t.counterparty && t.counterparty.toLowerCase().includes(term)) ||
-                       (t.description && t.description.toLowerCase().includes(term)) ||
-                       t.type.toLowerCase().includes(term) ||
-                       (t.reference && t.reference.toLowerCase().includes(term));
-            });
-        }
-        
-        const uniqueTransactions = [];
-        const seenRefs = new Set();
-        for (const t of filteredTransactions) {
-            if (!seenRefs.has(t.reference)) {
-                seenRefs.add(t.reference);
-                uniqueTransactions.push(t);
-            }
-        }
-        
-        if (uniqueTransactions.length === 0) {
-            const html = `
-                <div class="transactions-list">
-                    <h3 style="margin-bottom: 20px;">Transaction History</h3>
-                    ${searchTerm ? 
-                        `<div style="text-align: center; padding: 60px 20px;">
-                            <i class="fas fa-search" style="font-size: 48px; color: #a0aec0; margin-bottom: 20px;"></i>
-                            <p style="color: #a0aec0;">No transactions found matching "${escapeHtml(searchTerm)}"</p>
-                            <button onclick="window.loadTransactions()" class="btn-primary" style="margin-top: 20px; width: auto; padding: 10px 20px;">Clear Search</button>
-                        </div>` :
-                        `<div style="text-align: center; padding: 60px 20px;">
-                            <i class="fas fa-exchange-alt" style="font-size: 48px; color: #a0aec0; margin-bottom: 20px;"></i>
-                            <p style="color: #a0aec0;">No transactions yet</p>
-                            <p style="color: #a0aec0; font-size: 14px;">Make a deposit or send money to see transactions here</p>
-                        </div>`
-                    }
-                </div>
-            `;
-            const dashboardContent = document.getElementById('dashboardContent');
-            if (dashboardContent) dashboardContent.innerHTML = html;
-            hideLoading();
-            return;
-        }
+        const methods = await apiCall('/users/payment-methods');
         
         const html = `
             <div class="transactions-list">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
-                    <h3 style="margin: 0;">Transaction History</h3>
-                    ${searchTerm ? 
-                        `<div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="background: #667eea; color: white; padding: 5px 12px; border-radius: 20px; font-size: 12px;">
-                                <i class="fas fa-search"></i> Results for: "${escapeHtml(searchTerm)}"
-                            </span>
-                            <button onclick="window.loadTransactions()" class="btn-primary" style="padding: 5px 15px; width: auto; background: #a0aec0;">
-                                Clear
-                            </button>
-                        </div>` : ''
-                    }
-                </div>
-                ${uniqueTransactions.map(t => {
-                    let icon = 'exchange-alt';
-                    let title = '';
-                    let colorClass = '';
-                    let amountDisplay = '';
-                    
-                    if (t.type === 'deposit') {
-                        icon = 'arrow-down';
-                        title = 'Deposit';
-                        colorClass = 'credit';
-                        amountDisplay = `+${formatCurrency(t.amount)}`;
-                    } else if (t.type === 'withdraw') {
-                        icon = 'arrow-up';
-                        title = 'Withdrawal';
-                        colorClass = 'debit';
-                        amountDisplay = `-${formatCurrency(t.amount)}`;
-                    } else if (t.type === 'sent') {
-                        icon = 'paper-plane';
-                        title = `Sent to ${t.counterparty || 'Unknown'}`;
-                        colorClass = 'debit';
-                        amountDisplay = `-${formatCurrency(t.amount)}`;
-                    } else if (t.type === 'received') {
-                        icon = 'gift';
-                        title = `Received from ${t.counterparty || 'Unknown'}`;
-                        colorClass = 'credit';
-                        amountDisplay = `+${formatCurrency(t.amount)}`;
-                    }
-                    
-                    return `
-                        <div class="transaction-item">
-                            <div class="transaction-icon"><i class="fas fa-${icon}"></i></div>
+                <h3 style="margin-bottom: 20px;">💳 Payment Methods</h3>
+                <button onclick="window.showAddPaymentModal()" class="btn-primary" style="margin-bottom: 20px;">
+                    <i class="fas fa-plus"></i> Add Payment Method
+                </button>
+                ${methods.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: #a0aec0;">No payment methods saved yet.</div>' :
+                    methods.map(m => `
+                        <div class="transaction-item" style="${m.is_default ? 'border-left: 4px solid #667eea;' : ''}">
+                            <div class="transaction-icon"><i class="fas fa-credit-card"></i></div>
                             <div class="transaction-details">
-                                <div class="transaction-title">${escapeHtml(title)}</div>
-                                <div class="transaction-date">${new Date(t.created_at).toLocaleString()}</div>
-                                ${t.description ? `<div class="transaction-date">📝 ${escapeHtml(t.description)}</div>` : ''}
-                            </div>
-                            <div class="transaction-amount ${colorClass}">
-                                ${amountDisplay}
+                                <div class="transaction-title">${m.card_brand.toUpperCase()} •••• ${m.card_last4}</div>
+                                <div class="transaction-date">Added ${new Date(m.created_at).toLocaleDateString()}</div>
+                                ${m.is_default ? '<span style="background: #667eea; color: white; padding: 2px 10px; border-radius: 12px; font-size: 11px;">Default</span>' : ''}
                             </div>
                         </div>
-                    `;
-                }).join('')}
+                    `).join('')
+                }
             </div>
         `;
+        
         const dashboardContent = document.getElementById('dashboardContent');
         if (dashboardContent) dashboardContent.innerHTML = html;
         hideLoading();
     } catch (error) {
-        console.error('Error loading transactions:', error);
-        showToast('Failed to load transactions: ' + error.message, 'error');
+        console.error('Error loading payment methods:', error);
+        showToast('Failed to load payment methods: ' + error.message, 'error');
         hideLoading();
     }
 }
 
-// ============ TRANSACTION MODALS ============
-function showDepositModal() {
+function showAddPaymentModal() {
     const modalHtml = `
-        <div class="form-modal" id="transactionModal">
+        <div class="form-modal" id="paymentModal">
             <div class="form-container">
-                <h3><i class="fas fa-plus-circle"></i> Deposit Money</h3>
-                <div class="form-group"><label>Amount ($)</label><input type="number" id="depositAmount" placeholder="Enter amount" step="0.01" autofocus></div>
-                <div class="form-group"><label>Description (optional)</label><input type="text" id="depositDesc" placeholder="e.g., Salary deposit"></div>
-                <div class="form-actions"><button class="btn-cancel" onclick="window.closeModal()">Cancel</button><button class="btn-submit" onclick="window.processDeposit()">Deposit</button></div>
+                <h3><i class="fas fa-credit-card"></i> Add Payment Method</h3>
+                <div class="form-group">
+                    <label>Card Brand</label>
+                    <select id="paymentBrand" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <option value="visa">Visa</option>
+                        <option value="mastercard">Mastercard</option>
+                        <option value="amex">American Express</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Last 4 Digits</label>
+                    <input type="text" id="paymentLast4" placeholder="1234" maxlength="4" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="paymentDefault"> Set as default</label>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-cancel" onclick="window.closePaymentModal()">Cancel</button>
+                    <button class="btn-submit" onclick="window.addPaymentMethod()">Add Card</button>
+                </div>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
-async function processDeposit() {
-    const amountInput = document.getElementById('depositAmount');
-    const descInput = document.getElementById('depositDesc');
+async function addPaymentMethod() {
+    const card_brand = document.getElementById('paymentBrand')?.value;
+    const card_last4 = document.getElementById('paymentLast4')?.value;
+    const is_default = document.getElementById('paymentDefault')?.checked || false;
     
-    if (!amountInput) return;
-    
-    const amount = parseFloat(amountInput.value);
-    const description = descInput ? descInput.value : '';
-    
-    if (!amount || amount <= 0) {
-        showToast('Please enter a valid amount', 'error');
+    if (!card_last4 || card_last4.length !== 4 || !/^\d{4}$/.test(card_last4)) {
+        showToast('Please enter valid last 4 digits', 'error');
         return;
     }
     
     showLoading();
     try {
-        await apiCall('/transactions/deposit', 'POST', { amount, description });
-        showToast(`Deposited ${formatCurrency(amount)} successfully!`, 'success');
-        closeModal();
-        await loadUserOverview();
-        await loadNotifications();
-        document.querySelectorAll('#userDashboard .nav-item').forEach(nav => {
-            nav.classList.remove('active');
-            if (nav.dataset.page === 'overview') nav.classList.add('active');
-        });
+        await apiCall('/users/payment-methods', 'POST', { card_brand, card_last4, is_default });
+        showToast('Payment method added successfully!', 'success');
+        closePaymentModal();
+        await loadPaymentMethods();
     } catch (error) {
-        showToast('Deposit failed: ' + error.message, 'error');
+        showToast('Failed to add payment method: ' + error.message, 'error');
     } finally {
         hideLoading();
     }
 }
 
-function showWithdrawModal() {
-    const modalHtml = `
-        <div class="form-modal" id="transactionModal">
-            <div class="form-container">
-                <h3><i class="fas fa-minus-circle"></i> Withdraw Money</h3>
-                <div class="form-group"><label>Amount ($)</label><input type="number" id="withdrawAmount" placeholder="Enter amount" step="0.01" autofocus></div>
-                <div class="form-group"><label>Description (optional)</label><input type="text" id="withdrawDesc" placeholder="e.g., ATM withdrawal"></div>
-                <div class="form-actions"><button class="btn-cancel" onclick="window.closeModal()">Cancel</button><button class="btn-submit" onclick="window.processWithdraw()">Withdraw</button></div>
-            </div>
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
+function closePaymentModal() {
+    const modal = document.getElementById('paymentModal');
+    if (modal) modal.remove();
 }
 
-async function processWithdraw() {
-    const amountInput = document.getElementById('withdrawAmount');
-    const descInput = document.getElementById('withdrawDesc');
-    
-    if (!amountInput) return;
-    
-    const amount = parseFloat(amountInput.value);
-    const description = descInput ? descInput.value : '';
-    
-    if (!amount || amount <= 0) {
-        showToast('Please enter a valid amount', 'error');
-        return;
-    }
-    
+// ============ BUDGETS (NEW) ============
+async function loadBudgets() {
     showLoading();
     try {
-        await apiCall('/transactions/withdraw', 'POST', { amount, description });
-        showToast(`Withdrew ${formatCurrency(amount)} successfully!`, 'success');
-        closeModal();
-        await loadUserOverview();
-        await loadNotifications();
-        document.querySelectorAll('#userDashboard .nav-item').forEach(nav => {
-            nav.classList.remove('active');
-            if (nav.dataset.page === 'overview') nav.classList.add('active');
-        });
+        // Load categories for dropdown
+        let categories = [];
+        try {
+            const catResponse = await apiCall('/users/categories');
+            categories = catResponse;
+        } catch (e) {
+            console.log('Categories not loaded:', e);
+        }
+        
+        const budgets = await apiCall('/users/budgets');
+        
+        const html = `
+            <div class="transactions-list">
+                <h3 style="margin-bottom: 20px;">📊 Monthly Budgets</h3>
+                <button onclick="window.showAddBudgetModal()" class="btn-primary" style="margin-bottom: 20px;">
+                    <i class="fas fa-plus"></i> Set Budget
+                </button>
+                ${budgets.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: #a0aec0;">No budgets set yet. Create your first budget!</div>' :
+                    budgets.map(b => {
+                        const percentage = Math.min((b.spent / b.amount) * 100, 100);
+                        const color = percentage > 90 ? '#e53e3e' : percentage > 70 ? '#ed8936' : '#48bb78';
+                        return `
+                            <div class="transaction-item">
+                                <div class="transaction-icon"><i class="fas ${b.icon || 'fa-tag'}"></i></div>
+                                <div class="transaction-details" style="flex:1;">
+                                    <div class="transaction-title">${escapeHtml(b.category_name)}</div>
+                                    <div style="margin: 8px 0;">
+                                        <div style="background: #edf2f7; height: 8px; border-radius: 4px; overflow: hidden;">
+                                            <div style="height: 100%; width: ${percentage}%; background: ${color}; border-radius: 4px; transition: width 0.3s;"></div>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between; font-size: 13px; margin-top: 4px;">
+                                            <span>Spent: $${b.spent.toFixed(2)}</span>
+                                            <span>Budget: $${b.amount.toFixed(2)}</span>
+                                            <span style="color: ${color};">${percentage.toFixed(0)}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')
+                }
+            </div>
+        `;
+        
+        const dashboardContent = document.getElementById('dashboardContent');
+        if (dashboardContent) dashboardContent.innerHTML = html;
+        hideLoading();
     } catch (error) {
-        showToast('Withdrawal failed: ' + error.message, 'error');
-    } finally {
+        console.error('Error loading budgets:', error);
+        showToast('Failed to load budgets: ' + error.message, 'error');
         hideLoading();
     }
 }
 
-function showTransferModal() {
-    const modalHtml = `
-        <div class="form-modal" id="transactionModal">
-            <div class="form-container">
-                <h3><i class="fas fa-paper-plane"></i> Send Money</h3>
-                <div class="form-group"><label>Recipient Email</label><input type="email" id="transferEmail" placeholder="recipient@example.com" autofocus></div>
-                <div class="form-group"><label>Amount ($)</label><input type="number" id="transferAmount" placeholder="Enter amount" step="0.01"></div>
-                <div class="form-group"><label>Description (optional)</label><input type="text" id="transferDesc" placeholder="e.g., Dinner payment"></div>
-                <div class="form-actions"><button class="btn-cancel" onclick="window.closeModal()">Cancel</button><button class="btn-submit" onclick="window.processTransfer()">Send</button></div>
+function showAddBudgetModal() {
+    // Load categories for dropdown
+    fetch(`${API_URL}/users/categories`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+    })
+    .then(res => res.json())
+    .then(categories => {
+        const modalHtml = `
+            <div class="form-modal" id="budgetModal">
+                <div class="form-container">
+                    <h3><i class="fas fa-chart-pie"></i> Set Monthly Budget</h3>
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select id="budgetCategory" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            ${categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Amount ($)</label>
+                        <input type="number" id="budgetAmount" placeholder="Enter amount" step="0.01" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn-cancel" onclick="window.closeBudgetModal()">Cancel</button>
+                        <button class="btn-submit" onclick="window.addBudget()">Set Budget</button>
+                    </div>
+                </div>
             </div>
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    })
+    .catch(() => {
+        showToast('Failed to load categories', 'error');
+    });
 }
 
-async function processTransfer() {
-    const emailInput = document.getElementById('transferEmail');
-    const amountInput = document.getElementById('transferAmount');
-    const descInput = document.getElementById('transferDesc');
+async function addBudget() {
+    const category_name = document.getElementById('budgetCategory')?.value;
+    const amount = parseFloat(document.getElementById('budgetAmount')?.value);
     
-    if (!emailInput || !amountInput) return;
-    
-    const recipient_email = emailInput.value;
-    const amount = parseFloat(amountInput.value);
-    const description = descInput ? descInput.value : '';
-    
-    if (!recipient_email || !amount || amount <= 0) {
+    if (!category_name || !amount || amount <= 0) {
         showToast('Please fill all fields correctly', 'error');
         return;
     }
     
     showLoading();
     try {
-        const result = await apiCall('/transactions/transfer', 'POST', { recipient_email, amount, description });
-        showToast(result.message, 'success');
-        closeModal();
-        await loadUserOverview();
-        await loadNotifications();
-        document.querySelectorAll('#userDashboard .nav-item').forEach(nav => {
-            nav.classList.remove('active');
-            if (nav.dataset.page === 'overview') nav.classList.add('active');
-        });
+        await apiCall('/users/budgets', 'POST', { category_name, amount });
+        showToast('Budget set successfully!', 'success');
+        closeBudgetModal();
+        await loadBudgets();
     } catch (error) {
-        showToast('Transfer failed: ' + error.message, 'error');
+        showToast('Failed to set budget: ' + error.message, 'error');
     } finally {
         hideLoading();
     }
 }
 
-function closeModal() {
-    const modal = document.getElementById('transactionModal');
+function closeBudgetModal() {
+    const modal = document.getElementById('budgetModal');
     if (modal) modal.remove();
-    const beneficiaryModal = document.getElementById('beneficiaryModal');
-    if (beneficiaryModal) beneficiaryModal.remove();
-    const notificationsModal = document.getElementById('notificationsModal');
-    if (notificationsModal) notificationsModal.remove();
+}
+
+// ============ GOALS (NEW) ============
+async function loadGoals() {
+    showLoading();
+    try {
+        const goals = await apiCall('/users/goals');
+        
+        const html = `
+            <div class="transactions-list">
+                <h3 style="margin-bottom: 20px;">🎯 Financial Goals</h3>
+                <button onclick="window.showAddGoalModal()" class="btn-primary" style="margin-bottom: 20px;">
+                    <i class="fas fa-plus"></i> New Goal
+                </button>
+                ${goals.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: #a0aec0;">No goals set yet. Start saving today!</div>' :
+                    goals.map(g => {
+                        const percentage = Math.min((g.current_amount / g.target_amount) * 100, 100);
+                        return `
+                            <div class="transaction-item" style="${g.status === 'completed' ? 'border-left: 4px solid #48bb78;' : ''}">
+                                <div class="transaction-icon"><i class="fas fa-bullseye"></i></div>
+                                <div class="transaction-details" style="flex:1;">
+                                    <div class="transaction-title">${escapeHtml(g.name)} 
+                                        <span style="font-size: 12px; background: ${g.status === 'completed' ? '#48bb78' : '#ed8936'}; color: white; padding: 2px 10px; border-radius: 12px;">
+                                            ${g.status}
+                                        </span>
+                                    </div>
+                                    <div style="margin: 8px 0;">
+                                        <div style="background: #edf2f7; height: 8px; border-radius: 4px; overflow: hidden;">
+                                            <div style="height: 100%; width: ${percentage}%; background: #667eea; border-radius: 4px; transition: width 0.3s;"></div>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between; font-size: 13px; margin-top: 4px;">
+                                            <span>$${g.current_amount.toFixed(2)} saved</span>
+                                            <span>Target: $${g.target_amount.toFixed(2)}</span>
+                                            <span>${percentage.toFixed(0)}%</span>
+                                        </div>
+                                    </div>
+                                    ${g.deadline ? `<div style="font-size: 12px; color: #718096;">📅 Deadline: ${new Date(g.deadline).toLocaleDateString()}</div>` : ''}
+                                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                        <input type="number" id="goalProgress_${g.id}" placeholder="Add amount" step="0.01" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #e2e8f0; width: 150px;">
+                                        <button onclick="window.updateGoalProgress(${g.id})" class="btn-primary" style="padding: 6px 15px; width: auto;">Update</button>
+                                        <button onclick="window.deleteGoal(${g.id})" style="background: #f56565; border: none; padding: 6px 15px; border-radius: 6px; color: white; cursor: pointer;">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')
+                }
+            </div>
+        `;
+        
+        const dashboardContent = document.getElementById('dashboardContent');
+        if (dashboardContent) dashboardContent.innerHTML = html;
+        hideLoading();
+    } catch (error) {
+        console.error('Error loading goals:', error);
+        showToast('Failed to load goals: ' + error.message, 'error');
+        hideLoading();
+    }
+}
+
+function showAddGoalModal() {
+    const modalHtml = `
+        <div class="form-modal" id="goalModal">
+            <div class="form-container">
+                <h3><i class="fas fa-bullseye"></i> Create Financial Goal</h3>
+                <div class="form-group">
+                    <label>Goal Name</label>
+                    <input type="text" id="goalName" placeholder="e.g., Vacation Fund" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                </div>
+                <div class="form-group">
+                    <label>Target Amount ($)</label>
+                    <input type="number" id="goalTarget" placeholder="Enter amount" step="0.01" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                </div>
+                <div class="form-group">
+                    <label>Deadline (optional)</label>
+                    <input type="date" id="goalDeadline" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                </div>
+                <div class="form-actions">
+                    <button class="btn-cancel" onclick="window.closeGoalModal()">Cancel</button>
+                    <button class="btn-submit" onclick="window.createGoal()">Create Goal</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+async function createGoal() {
+    const name = document.getElementById('goalName')?.value;
+    const target_amount = parseFloat(document.getElementById('goalTarget')?.value);
+    const deadline = document.getElementById('goalDeadline')?.value || null;
+    
+    if (!name || !target_amount || target_amount <= 0) {
+        showToast('Please fill all fields correctly', 'error');
+        return;
+    }
+    
+    showLoading();
+    try {
+        await apiCall('/users/goals', 'POST', { name, target_amount, deadline });
+        showToast('Goal created successfully!', 'success');
+        closeGoalModal();
+        await loadGoals();
+    } catch (error) {
+        showToast('Failed to create goal: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function updateGoalProgress(goalId) {
+    const input = document.getElementById(`goalProgress_${goalId}`);
+    if (!input) return;
+    
+    const current_amount = parseFloat(input.value);
+    if (!current_amount || current_amount <= 0) {
+        showToast('Please enter a valid amount', 'error');
+        return;
+    }
+    
+    showLoading();
+    try {
+        await apiCall(`/users/goals/${goalId}/progress`, 'PUT', { current_amount });
+        showToast('Progress updated!', 'success');
+        input.value = '';
+        await loadGoals();
+    } catch (error) {
+        showToast('Failed to update progress: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function deleteGoal(goalId) {
+    if (!confirm('Delete this goal?')) return;
+    
+    showLoading();
+    try {
+        await apiCall(`/users/goals/${goalId}`, 'DELETE');
+        showToast('Goal deleted!', 'success');
+        await loadGoals();
+    } catch (error) {
+        showToast('Failed to delete goal: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function closeGoalModal() {
+    const modal = document.getElementById('goalModal');
+    if (modal) modal.remove();
+}
+
+// ============ SUPPORT TICKETS (NEW) ============
+async function loadTickets() {
+    showLoading();
+    try {
+        const tickets = await apiCall('/users/tickets');
+        
+        const html = `
+            <div class="transactions-list">
+                <h3 style="margin-bottom: 20px;">🎫 Support Tickets</h3>
+                <button onclick="window.showAddTicketModal()" class="btn-primary" style="margin-bottom: 20px;">
+                    <i class="fas fa-plus"></i> New Ticket
+                </button>
+                ${tickets.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: #a0aec0;">No support tickets yet.</div>' :
+                    tickets.map(t => `
+                        <div class="transaction-item" style="border-left: 4px solid ${t.status === 'open' ? '#ed8936' : t.status === 'resolved' ? '#48bb78' : '#a0aec0'};">
+                            <div class="transaction-icon"><i class="fas fa-life-ring"></i></div>
+                            <div class="transaction-details">
+                                <div class="transaction-title">#${t.id} - ${escapeHtml(t.subject)}</div>
+                                <div class="transaction-date">${new Date(t.created_at).toLocaleString()}</div>
+                                <div style="margin-top: 8px;">${escapeHtml(t.message)}</div>
+                                <div style="margin-top: 5px;">
+                                    <span style="background: ${t.status === 'open' ? '#fefcbf' : t.status === 'resolved' ? '#c6f6d5' : '#edf2f7'}; padding: 2px 10px; border-radius: 12px; font-size: 12px;">
+                                        ${t.status}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')
+                }
+            </div>
+        `;
+        
+        const dashboardContent = document.getElementById('dashboardContent');
+        if (dashboardContent) dashboardContent.innerHTML = html;
+        hideLoading();
+    } catch (error) {
+        console.error('Error loading tickets:', error);
+        showToast('Failed to load tickets: ' + error.message, 'error');
+        hideLoading();
+    }
+}
+
+function showAddTicketModal() {
+    const modalHtml = `
+        <div class="form-modal" id="ticketModal">
+            <div class="form-container">
+                <h3><i class="fas fa-life-ring"></i> Create Support Ticket</h3>
+                <div class="form-group">
+                    <label>Subject</label>
+                    <input type="text" id="ticketSubject" placeholder="Brief subject" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                </div>
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea id="ticketMessage" placeholder="Describe your issue..." rows="4" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-cancel" onclick="window.closeTicketModal()">Cancel</button>
+                    <button class="btn-submit" onclick="window.createTicket()">Submit</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+async function createTicket() {
+    const subject = document.getElementById('ticketSubject')?.value;
+    const message = document.getElementById('ticketMessage')?.value;
+    
+    if (!subject || !message) {
+        showToast('Please fill all fields', 'error');
+        return;
+    }
+    
+    showLoading();
+    try {
+        await apiCall('/users/tickets', 'POST', { subject, message });
+        showToast('Ticket created successfully!', 'success');
+        closeTicketModal();
+        await loadTickets();
+    } catch (error) {
+        showToast('Failed to create ticket: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function closeTicketModal() {
+    const modal = document.getElementById('ticketModal');
+    if (modal) modal.remove();
 }
 
 // ============ BENEFICIARY FUNCTIONS ============
@@ -1792,6 +1857,11 @@ async function deleteUser(userId) {
 }
 
 // ============ HELPER FUNCTIONS ============
+function formatCurrency(amount) {
+    if (amount === undefined || amount === null) return '$0.00';
+    return '$' + parseFloat(amount).toFixed(2);
+}
+
 function formatDateShort(dateString) {
     const date = new Date(dateString);
     const now = new Date();
@@ -1878,6 +1948,26 @@ window.toggleNotifications = toggleNotifications;
 window.markNotificationRead = markNotificationRead;
 window.markAllRead = markAllRead;
 window.getInitials = getInitials;
+
+// NEW EXPORTS FOR NEW FEATURES
+window.loadPaymentMethods = loadPaymentMethods;
+window.showAddPaymentModal = showAddPaymentModal;
+window.addPaymentMethod = addPaymentMethod;
+window.closePaymentModal = closePaymentModal;
+window.loadBudgets = loadBudgets;
+window.showAddBudgetModal = showAddBudgetModal;
+window.addBudget = addBudget;
+window.closeBudgetModal = closeBudgetModal;
+window.loadGoals = loadGoals;
+window.showAddGoalModal = showAddGoalModal;
+window.createGoal = createGoal;
+window.updateGoalProgress = updateGoalProgress;
+window.deleteGoal = deleteGoal;
+window.closeGoalModal = closeGoalModal;
+window.loadTickets = loadTickets;
+window.showAddTicketModal = showAddTicketModal;
+window.createTicket = createTicket;
+window.closeTicketModal = closeTicketModal;
 
 // Tab switching for auth
 const tabBtns = document.querySelectorAll('.tab-btn');

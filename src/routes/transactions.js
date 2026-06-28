@@ -9,7 +9,7 @@ router.post('/deposit', auth, async (req, res) => {
     const client = await db.getClient();
     
     try {
-        const { amount, description } = req.body;
+        const { amount, description, category } = req.body;
         
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
@@ -57,7 +57,7 @@ router.post('/withdraw', auth, async (req, res) => {
     const client = await db.getClient();
     
     try {
-        const { amount, description } = req.body;
+        const { amount, description, category } = req.body;
         
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
@@ -94,6 +94,11 @@ router.post('/withdraw', auth, async (req, res) => {
             [req.user.id, `$${amount} withdrawn successfully!`]
         );
         
+        // Track budget for withdrawal (expense)
+        if (category) {
+            await trackBudgetSpending(client, req.user.id, amount, category);
+        }
+        
         await client.query('COMMIT');
         
         res.json({
@@ -115,7 +120,7 @@ router.post('/transfer', auth, async (req, res) => {
     const client = await db.getClient();
     
     try {
-        const { recipient_email, amount, description } = req.body;
+        const { recipient_email, amount, description, category } = req.body;
         
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
@@ -194,6 +199,19 @@ router.post('/transfer', auth, async (req, res) => {
             [recipient.id, `You received $${amount} from ${req.user.name}`]
         );
         
+        // Track budget for transfer (expense for sender)
+        if (category) {
+            await trackBudgetSpending(client, req.user.id, amount, category);
+        }
+        
+        // Add to beneficiary if not exists
+        await client.query(
+            `INSERT INTO beneficiaries (user_id, beneficiary_name, beneficiary_email)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, beneficiary_email) DO NOTHING`,
+            [req.user.id, recipient.name, recipient.email]
+        );
+        
         await client.query('COMMIT');
         
         res.json({
@@ -209,6 +227,48 @@ router.post('/transfer', auth, async (req, res) => {
         client.release();
     }
 });
+
+// Helper function to track budget spending
+async function trackBudgetSpending(client, userId, amount, categoryName) {
+    try {
+        const currentMonth = new Date().getMonth() + 1;
+        const currentYear = new Date().getFullYear();
+        
+        // Find budget for this category
+        const budgetCheck = await client.query(
+            `SELECT b.id, b.amount, b.spent 
+             FROM budgets b
+             JOIN categories c ON b.category_id = c.id
+             WHERE b.user_id = $1 AND c.name = $2 
+             AND b.month = $3 AND b.year = $4`,
+            [userId, categoryName, currentMonth, currentYear]
+        );
+        
+        if (budgetCheck.rows.length > 0) {
+            const budget = budgetCheck.rows[0];
+            const newSpent = parseFloat(budget.spent) + parseFloat(amount);
+            
+            await client.query(
+                `UPDATE budgets 
+                 SET spent = $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [newSpent, budget.id]
+            );
+            
+            // Alert if over budget
+            if (newSpent > parseFloat(budget.amount)) {
+                await client.query(
+                    `INSERT INTO notifications (user_id, message, is_read, created_at)
+                     VALUES ($1, $2, false, NOW())`,
+                    [userId, `⚠️ Budget alert: You've exceeded your ${categoryName} budget!`]
+                );
+            }
+        }
+    } catch (error) {
+        console.error('Error tracking budget:', error);
+        // Don't fail the transaction if budget tracking fails
+    }
+}
 
 // GET /api/transactions/history
 router.get('/history', auth, async (req, res) => {
