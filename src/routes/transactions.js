@@ -57,7 +57,7 @@ router.post('/withdraw', auth, async (req, res) => {
     const client = await db.getClient();
     
     try {
-        const { amount, description, category } = req.body;
+        const { amount, description } = req.body;  // ✅ Remove 'category' from here
         
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
@@ -81,35 +81,28 @@ router.post('/withdraw', auth, async (req, res) => {
         );
         
         const reference = `WTH_${Date.now()}_${req.user.id}`;
-        const transactionResult = await client.query(
+        await client.query(
             `INSERT INTO transactions (reference, user_id, type, amount, description, status)
-             VALUES ($1, $2, 'withdraw', $3, $4, 'completed') RETURNING *`,
+             VALUES ($1, $2, 'withdraw', $3, $4, 'completed')`,
             [reference, req.user.id, amount, description || 'Withdrawal']
         );
         
-        // Simple notification for withdrawal
         await client.query(
             `INSERT INTO notifications (user_id, message, is_read, created_at)
              VALUES ($1, $2, false, NOW())`,
             [req.user.id, `$${amount} withdrawn successfully!`]
         );
         
-        // Track budget for withdrawal (expense)
-        if (category) {
-            await trackBudgetSpending(client, req.user.id, amount, category);
-        }
-        
         await client.query('COMMIT');
         
         res.json({
             message: 'Withdrawal successful',
-            transaction: transactionResult.rows[0],
             new_balance: balanceResult.rows[0].balance
         });
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(error);
-        res.status(500).json({ error: 'Withdrawal failed' });
+        res.status(500).json({ error: 'Withdrawal failed: ' + error.message });
     } finally {
         client.release();
     }
@@ -228,11 +221,16 @@ router.post('/transfer', auth, async (req, res) => {
     }
 });
 
-// Helper function to track budget spending
+// ============================================
+// BUDGET TRACKING HELPER
+// ============================================
+
 async function trackBudgetSpending(client, userId, amount, categoryName) {
     try {
         const currentMonth = new Date().getMonth() + 1;
         const currentYear = new Date().getFullYear();
+        
+        console.log(`Tracking budget: User ${userId}, Category: ${categoryName}, Amount: ${amount}`);
         
         // Find budget for this category
         const budgetCheck = await client.query(
@@ -246,7 +244,10 @@ async function trackBudgetSpending(client, userId, amount, categoryName) {
         
         if (budgetCheck.rows.length > 0) {
             const budget = budgetCheck.rows[0];
-            const newSpent = parseFloat(budget.spent) + parseFloat(amount);
+            const currentSpent = parseFloat(budget.spent) || 0;
+            const newSpent = currentSpent + parseFloat(amount);
+            
+            console.log(`Budget found: Current spent: ${currentSpent}, New spent: ${newSpent}, Limit: ${budget.amount}`);
             
             await client.query(
                 `UPDATE budgets 
@@ -262,7 +263,10 @@ async function trackBudgetSpending(client, userId, amount, categoryName) {
                      VALUES ($1, $2, false, NOW())`,
                     [userId, `⚠️ Budget alert: You've exceeded your ${categoryName} budget!`]
                 );
+                console.log(`Budget alert sent for ${categoryName}`);
             }
+        } else {
+            console.log(`No budget found for category: ${categoryName}`);
         }
     } catch (error) {
         console.error('Error tracking budget:', error);
@@ -302,5 +306,47 @@ router.get('/history', auth, async (req, res) => {
         res.status(500).json({ error: 'Failed to get transaction history: ' + error.message });
     }
 });
+
+// Add this function to transactions.js
+async function trackBudgetSpending(client, userId, amount, categoryName) {
+    try {
+        const currentMonth = new Date().getMonth() + 1;
+        const currentYear = new Date().getFullYear();
+        
+        // Find budget for this category
+        const budgetCheck = await client.query(
+            `SELECT b.id, b.amount, b.spent 
+             FROM budgets b
+             JOIN categories c ON b.category_id = c.id
+             WHERE b.user_id = $1 AND c.name = $2 
+             AND b.month = $3 AND b.year = $4`,
+            [userId, categoryName, currentMonth, currentYear]
+        );
+        
+        if (budgetCheck.rows.length > 0) {
+            const budget = budgetCheck.rows[0];
+            const newSpent = parseFloat(budget.spent) + parseFloat(amount);
+            
+            await client.query(
+                `UPDATE budgets 
+                 SET spent = $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [newSpent, budget.id]
+            );
+            
+            // Alert if over budget
+            if (newSpent > parseFloat(budget.amount)) {
+                await client.query(
+                    `INSERT INTO notifications (user_id, message, is_read, created_at)
+                     VALUES ($1, $2, false, NOW())`,
+                    [userId, `⚠️ Budget alert: You've exceeded your ${categoryName} budget!`]
+                );
+            }
+        }
+    } catch (error) {
+        console.error('Error tracking budget:', error);
+        // Don't fail the transaction
+    }
+}
 
 module.exports = router;

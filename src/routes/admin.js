@@ -1,11 +1,30 @@
 const express = require('express');
 const db = require('../db/database');
-const { auth, adminAuth } = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
 const router = express.Router();
 
+// ============================================
+// ADMIN MIDDLEWARE
+// ============================================
+const isAdmin = async (req, res, next) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied: Admin only' });
+        }
+        next();
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// Apply auth and admin check to all routes in this file
 router.use(auth);
-router.use(adminAuth);
+router.use(isAdmin);
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
 
 // GET /api/admin/users - Get all users (EXCLUDE ADMIN)
 router.get('/users', async (req, res) => {
@@ -22,83 +41,6 @@ router.get('/users', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to get users' });
-    }
-});
-
-// GET /api/admin/stats - Enhanced system statistics
-router.get('/stats', async (req, res) => {
-    try {
-        // Total users (excluding admin)
-        const totalUsers = await db.query("SELECT COUNT(*) FROM users WHERE role != 'admin'");
-        
-        // Count ACTIVE users (where status = 'active')
-        const activeUsers = await db.query("SELECT COUNT(*) FROM users WHERE role != 'admin' AND status = 'active'");
-        
-        const totalTransactions = await db.query('SELECT COUNT(*) FROM transactions');
-        const totalVolume = await db.query('SELECT COALESCE(SUM(amount), 0) as total FROM transactions');
-        const totalBalance = await db.query("SELECT COALESCE(SUM(balance), 0) as total FROM users WHERE role != 'admin'");
-        const blockedUsers = await db.query("SELECT COUNT(*) FROM users WHERE status = 'blocked' AND role != 'admin'");
-        
-        // ============ DAILY ACTIVITY (Last 30 days) ============
-        const dailyActivity = await db.query(
-            `SELECT 
-                DATE(created_at) as date,
-                COUNT(*) as count,
-                COALESCE(SUM(amount), 0) as total
-             FROM transactions 
-             WHERE created_at > NOW() - INTERVAL '30 days'
-             GROUP BY DATE(created_at)
-             ORDER BY date DESC`
-        );
-        
-        // ============ MONTHLY SUMMARY (Last 6 months) ============
-        const monthlySummary = await db.query(
-            `SELECT 
-                TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month,
-                COUNT(*) as transaction_count,
-                COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE 0 END), 0) as total_deposits,
-                COALESCE(SUM(CASE WHEN type = 'withdraw' THEN amount ELSE 0 END), 0) as total_withdrawals,
-                COALESCE(SUM(CASE WHEN type = 'sent' THEN amount ELSE 0 END), 0) as total_sent,
-                COALESCE(SUM(CASE WHEN type = 'received' THEN amount ELSE 0 END), 0) as total_received,
-                COALESCE(SUM(amount), 0) as total_volume
-             FROM transactions 
-             WHERE created_at > NOW() - INTERVAL '6 months'
-             GROUP BY DATE_TRUNC('month', created_at)
-             ORDER BY month DESC`
-        );
-        
-        // Transaction type distribution (pie chart)
-        const typeDistribution = await db.query(
-            `SELECT 
-                type,
-                COUNT(*) as count,
-                COALESCE(SUM(amount), 0) as total_amount
-             FROM transactions 
-             GROUP BY type`
-        );
-        
-        // Top users by balance
-        const topUsers = await db.query(
-            "SELECT name, balance, COALESCE((SELECT COUNT(*) FROM transactions WHERE user_id = users.id), 0) as transaction_count FROM users WHERE role != 'admin' ORDER BY balance DESC LIMIT 5"
-        );
-        
-        res.json({
-            summary: {
-                total_users: parseInt(totalUsers.rows[0].count),
-                active_users: parseInt(activeUsers.rows[0].count),
-                total_transactions: parseInt(totalTransactions.rows[0].count),
-                total_volume: parseFloat(totalVolume.rows[0].total),
-                total_balance: parseFloat(totalBalance.rows[0].total),
-                blocked_users: parseInt(blockedUsers.rows[0].count)
-            },
-            daily_activity: dailyActivity.rows,
-            monthly_summary: monthlySummary.rows,
-            type_distribution: typeDistribution.rows,
-            top_users: topUsers.rows
-        });
-    } catch (error) {
-        console.error('Stats error:', error);
-        res.status(500).json({ error: 'Failed to get statistics: ' + error.message });
     }
 });
 
@@ -281,6 +223,63 @@ router.put('/users/:id/status', async (req, res) => {
     }
 });
 
+// PUT /api/admin/users/:id/balance - Update balance
+router.put('/users/:id/balance', async (req, res) => {
+    try {
+        const { balance } = req.body;
+        const userId = req.params.id;
+        
+        const userCheck = await db.query('SELECT role FROM users WHERE id = $1', [userId]);
+        if (userCheck.rows[0]?.role === 'admin') {
+            return res.status(403).json({ error: 'Cannot modify admin user' });
+        }
+        
+        const result = await db.query(
+            `UPDATE users SET balance = $1 WHERE id = $2 AND role != 'admin' RETURNING id, name, balance`,
+            [balance, userId]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        res.json({ message: 'Balance updated', user: result.rows[0] });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to update balance' });
+    }
+});
+
+// DELETE /api/admin/users/:id - Delete user
+router.delete('/users/:id', async (req, res) => {
+    const client = await db.getClient();
+    
+    try {
+        const userId = req.params.id;
+        
+        const userCheck = await db.query('SELECT role FROM users WHERE id = $1', [userId]);
+        if (userCheck.rows[0]?.role === 'admin') {
+            return res.status(403).json({ error: 'Cannot delete admin user' });
+        }
+        
+        await client.query('BEGIN');
+        await client.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM beneficiaries WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM transactions WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM users WHERE id = $1', [userId]);
+        await client.query('COMMIT');
+        
+        res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(error);
+        res.status(500).json({ error: 'Failed to delete user' });
+    } finally {
+        client.release();
+    }
+});
+
 // GET /api/admin/users/:id/statement - Generate statement
 router.get('/users/:id/statement', async (req, res) => {
     try {
@@ -348,62 +347,9 @@ router.get('/users/:id/statement', async (req, res) => {
     }
 });
 
-// PUT /api/admin/users/:id/balance - Update balance
-router.put('/users/:id/balance', async (req, res) => {
-    try {
-        const { balance } = req.body;
-        const userId = req.params.id;
-        
-        const userCheck = await db.query('SELECT role FROM users WHERE id = $1', [userId]);
-        if (userCheck.rows[0]?.role === 'admin') {
-            return res.status(403).json({ error: 'Cannot modify admin user' });
-        }
-        
-        const result = await db.query(
-            `UPDATE users SET balance = $1 WHERE id = $2 AND role != 'admin' RETURNING id, name, balance`,
-            [balance, userId]
-        );
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        
-        res.json({ message: 'Balance updated', user: result.rows[0] });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to update balance' });
-    }
-});
-
-// DELETE /api/admin/users/:id - Delete user
-router.delete('/users/:id', async (req, res) => {
-    const client = await db.getClient();
-    
-    try {
-        const userId = req.params.id;
-        
-        const userCheck = await db.query('SELECT role FROM users WHERE id = $1', [userId]);
-        if (userCheck.rows[0]?.role === 'admin') {
-            return res.status(403).json({ error: 'Cannot delete admin user' });
-        }
-        
-        await client.query('BEGIN');
-        await client.query('DELETE FROM user_profiles WHERE user_id = $1', [userId]);
-        await client.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
-        await client.query('DELETE FROM beneficiaries WHERE user_id = $1', [userId]);
-        await client.query('DELETE FROM transactions WHERE user_id = $1', [userId]);
-        await client.query('DELETE FROM users WHERE id = $1', [userId]);
-        await client.query('COMMIT');
-        
-        res.json({ message: 'User deleted successfully' });
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error(error);
-        res.status(500).json({ error: 'Failed to delete user' });
-    } finally {
-        client.release();
-    }
-});
+// ============================================
+// STATISTICS (SINGLE DEFINITION)
+// ============================================
 
 // GET /api/admin/stats - Enhanced system statistics
 router.get('/stats', async (req, res) => {
@@ -411,30 +357,40 @@ router.get('/stats', async (req, res) => {
         // Total users (excluding admin)
         const totalUsers = await db.query("SELECT COUNT(*) FROM users WHERE role != 'admin'");
         
-        // Total transactions
+        // Count ACTIVE users (where status = 'active')
+        const activeUsers = await db.query("SELECT COUNT(*) FROM users WHERE role != 'admin' AND status = 'active'");
+        
         const totalTransactions = await db.query('SELECT COUNT(*) FROM transactions');
-        
-        // Total volume (sum of all transactions)
         const totalVolume = await db.query('SELECT COALESCE(SUM(amount), 0) as total FROM transactions');
-        
-        // Total balance across all user accounts
         const totalBalance = await db.query("SELECT COALESCE(SUM(balance), 0) as total FROM users WHERE role != 'admin'");
+        const blockedUsers = await db.query("SELECT COUNT(*) FROM users WHERE status = 'blocked' AND role != 'admin'");
         
-        // Daily activity for last 7 days
+        // Daily Activity (Last 30 days)
         const dailyActivity = await db.query(
             `SELECT 
                 DATE(created_at) as date,
                 COUNT(*) as count,
-                SUM(amount) as volume,
-                SUM(CASE WHEN type = 'deposit' THEN amount ELSE 0 END) as deposits,
-                SUM(CASE WHEN type = 'withdraw' THEN amount ELSE 0 END) as withdrawals,
-                SUM(CASE WHEN type = 'sent' THEN amount ELSE 0 END) as sent,
-                SUM(CASE WHEN type = 'received' THEN amount ELSE 0 END) as received
+                COALESCE(SUM(amount), 0) as total
              FROM transactions 
              WHERE created_at > NOW() - INTERVAL '30 days'
              GROUP BY DATE(created_at)
-             ORDER BY date DESC
-             LIMIT 30`
+             ORDER BY date DESC`
+        );
+        
+        // Monthly Summary (Last 6 months)
+        const monthlySummary = await db.query(
+            `SELECT 
+                TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month,
+                COUNT(*) as transaction_count,
+                COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE 0 END), 0) as total_deposits,
+                COALESCE(SUM(CASE WHEN type = 'withdraw' THEN amount ELSE 0 END), 0) as total_withdrawals,
+                COALESCE(SUM(CASE WHEN type = 'sent' THEN amount ELSE 0 END), 0) as total_sent,
+                COALESCE(SUM(CASE WHEN type = 'received' THEN amount ELSE 0 END), 0) as total_received,
+                COALESCE(SUM(amount), 0) as total_volume
+             FROM transactions 
+             WHERE created_at > NOW() - INTERVAL '6 months'
+             GROUP BY DATE_TRUNC('month', created_at)
+             ORDER BY month DESC`
         );
         
         // Transaction type distribution (pie chart)
@@ -442,85 +398,39 @@ router.get('/stats', async (req, res) => {
             `SELECT 
                 type,
                 COUNT(*) as count,
-                SUM(amount) as total_amount
+                COALESCE(SUM(amount), 0) as total_amount
              FROM transactions 
              GROUP BY type`
         );
         
-        // Top 10 users by transaction volume
-        const topUsersByVolume = await db.query(
-            `SELECT 
-                u.name,
-                u.email,
-                COUNT(t.id) as transaction_count,
-                SUM(t.amount) as total_volume
-             FROM users u
-             JOIN transactions t ON u.id = t.user_id
-             WHERE u.role != 'admin'
-             GROUP BY u.id, u.name, u.email
-             ORDER BY total_volume DESC
-             LIMIT 10`
-        );
-        
-        // Monthly summary for bar chart
-        const monthlySummary = await db.query(
-            `SELECT 
-                TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') as month,
-                COUNT(*) as transaction_count,
-                SUM(amount) as total_volume,
-                SUM(CASE WHEN type = 'deposit' THEN amount ELSE 0 END) as total_deposits,
-                SUM(CASE WHEN type = 'withdraw' THEN amount ELSE 0 END) as total_withdrawals,
-                SUM(CASE WHEN type = 'sent' THEN amount ELSE 0 END) as total_sent,
-                SUM(CASE WHEN type = 'received' THEN amount ELSE 0 END) as total_received
-             FROM transactions 
-             WHERE created_at > NOW() - INTERVAL '6 months'
-             GROUP BY DATE_TRUNC('month', created_at)
-             ORDER BY month DESC`
-        );
-        
-        // User registration trend
-        const registrationTrend = await db.query(
-            `SELECT 
-                DATE(created_at) as date,
-                COUNT(*) as new_users
-             FROM users 
-             WHERE role != 'admin' AND created_at > NOW() - INTERVAL '30 days'
-             GROUP BY DATE(created_at)
-             ORDER BY date DESC`
-        );
-        
-        // Blocked users count
-        const blockedUsers = await db.query(
-            "SELECT COUNT(*) FROM users WHERE status = 'blocked' AND role != 'admin'"
-        );
-        
-        // Active users (have done at least one transaction in last 30 days)
-        const activeUsers = await db.query(
-            `SELECT COUNT(DISTINCT user_id) as active
-             FROM transactions 
-             WHERE created_at > NOW() - INTERVAL '30 days'`
+        // Top users by balance
+        const topUsers = await db.query(
+            "SELECT name, balance, COALESCE((SELECT COUNT(*) FROM transactions WHERE user_id = users.id), 0) as transaction_count FROM users WHERE role != 'admin' ORDER BY balance DESC LIMIT 5"
         );
         
         res.json({
             summary: {
                 total_users: parseInt(totalUsers.rows[0].count),
+                active_users: parseInt(activeUsers.rows[0].count),
                 total_transactions: parseInt(totalTransactions.rows[0].count),
                 total_volume: parseFloat(totalVolume.rows[0].total),
                 total_balance: parseFloat(totalBalance.rows[0].total),
-                blocked_users: parseInt(blockedUsers.rows[0].count),
-                active_users: parseInt(activeUsers.rows[0].count)
+                blocked_users: parseInt(blockedUsers.rows[0].count)
             },
             daily_activity: dailyActivity.rows,
-            type_distribution: typeDistribution.rows,
-            top_users: topUsersByVolume.rows,
             monthly_summary: monthlySummary.rows,
-            registration_trend: registrationTrend.rows
+            type_distribution: typeDistribution.rows,
+            top_users: topUsers.rows
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to get statistics' });
+        console.error('Stats error:', error);
+        res.status(500).json({ error: 'Failed to get statistics: ' + error.message });
     }
 });
+
+// ============================================
+// TRANSACTIONS
+// ============================================
 
 // GET /api/admin/transactions - All transactions
 router.get('/transactions', async (req, res) => {
@@ -539,6 +449,100 @@ router.get('/transactions', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to get transactions' });
+    }
+});
+
+// ============================================
+// SUPPORT TICKETS
+// ============================================
+
+// GET /api/admin/tickets - Get all tickets
+router.get('/tickets', async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT t.*, u.name as user_name, u.email as user_email
+             FROM support_tickets t
+             JOIN users u ON t.user_id = u.id
+             ORDER BY 
+                CASE t.status 
+                    WHEN 'open' THEN 1
+                    WHEN 'in_progress' THEN 2
+                    WHEN 'resolved' THEN 3
+                    WHEN 'closed' THEN 4
+                END,
+                t.created_at DESC`
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching tickets:', error);
+        res.status(500).json({ error: 'Failed to fetch tickets' });
+    }
+});
+
+// PUT /api/admin/tickets/:id - Update ticket status
+router.put('/tickets/:id', async (req, res) => {
+    try {
+        const { status } = req.body;
+        const ticketId = req.params.id;
+        
+        // Validate status
+        const validStatuses = ['open', 'in_progress', 'resolved', 'closed'];
+        if (!status || !validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+        
+        // Get ticket to check if it exists
+        const ticketCheck = await db.query(
+            'SELECT * FROM support_tickets WHERE id = $1',
+            [ticketId]
+        );
+        
+        if (ticketCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Ticket not found' });
+        }
+        
+        // Update ticket
+        const result = await db.query(
+            `UPDATE support_tickets 
+             SET status = $1
+             WHERE id = $2
+             RETURNING *`,
+            [status, ticketId]
+        );
+        
+        // Notify user
+        await db.query(
+            `INSERT INTO notifications (user_id, message, is_read, created_at)
+             VALUES ($1, $2, false, NOW())`,
+            [ticketCheck.rows[0].user_id, `Your support ticket #${ticketId} has been updated to: ${status}`]
+        );
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error updating ticket:', error);
+        res.status(500).json({ error: 'Failed to update ticket' });
+    }
+});
+
+// GET /api/admin/tickets/:id - Get single ticket details
+router.get('/tickets/:id', async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT t.*, u.name as user_name, u.email as user_email
+             FROM support_tickets t
+             JOIN users u ON t.user_id = u.id
+             WHERE t.id = $1`,
+            [req.params.id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Ticket not found' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error fetching ticket:', error);
+        res.status(500).json({ error: 'Failed to fetch ticket' });
     }
 });
 

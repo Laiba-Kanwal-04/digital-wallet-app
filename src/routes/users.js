@@ -364,11 +364,12 @@ router.post('/categories', auth, async (req, res) => {
 // ============================================
 // BUDGET ROUTES (NEW)
 // ============================================
-
 // POST /api/users/budgets - Create/Update budget
 router.post('/budgets', auth, async (req, res) => {
     try {
         const { category_name, amount, month, year } = req.body;
+        
+        console.log('Creating budget:', { category_name, amount, month, year }); // Debug log
         
         // Get category ID
         const categoryResult = await db.query(
@@ -396,8 +397,8 @@ router.post('/budgets', auth, async (req, res) => {
         
         res.json(result.rows[0]);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to set budget' });
+        console.error('Budget creation error:', error);
+        res.status(500).json({ error: 'Failed to set budget: ' + error.message });
     }
 });
 
@@ -419,7 +420,7 @@ router.get('/budgets', auth, async (req, res) => {
         
         res.json(result.rows);
     } catch (error) {
-        console.error(error);
+        console.error('Error fetching budgets:', error);
         res.status(500).json({ error: 'Failed to get budgets' });
     }
 });
