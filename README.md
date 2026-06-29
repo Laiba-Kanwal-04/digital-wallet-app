@@ -123,7 +123,7 @@ digital-wallet-app/
 │       └── utils.js        # Utility functions
 ├── db-schema.sql           # Complete database schema
 ├── package.json
-├── .env.example            # Example environment variables
+├── .env            # Example environment variables
 └── README.md
 ```
 
